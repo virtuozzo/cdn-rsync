@@ -19,6 +19,9 @@
  * with this program; if not, visit the http://fsf.org website.
  */
 
+#include <stdlib.h>
+#include <string.h>
+
 #include "rsync.h"
 #include "ifuncs.h"
 #include "inums.h"
@@ -37,6 +40,7 @@ extern int preserve_links;
 extern int preserve_devices;
 extern int preserve_specials;
 extern int checksum_seed;
+extern int copy_links;
 
 #define RSYNC_XAL_INITIAL 5
 #define RSYNC_XAL_LIST_INITIAL 100
@@ -134,7 +138,11 @@ static ssize_t get_xattr_names(const char *fname)
 
 	while (1) {
 		/* The length returned includes all the '\0' terminators. */
-		list_len = sys_llistxattr(fname, namebuf, namebuf_len);
+		if (copy_links)
+			list_len = sys_listxattr(fname, namebuf, namebuf_len);
+		else
+			list_len = sys_llistxattr(fname, namebuf, namebuf_len);
+
 		if (list_len >= 0) {
 			if ((size_t)list_len <= namebuf_len)
 				break;
@@ -148,7 +156,11 @@ static ssize_t get_xattr_names(const char *fname)
 				full_fname(fname), big_num(arg));
 			return -1;
 		}
-		list_len = sys_llistxattr(fname, NULL, 0);
+
+		if (copy_links)
+			list_len = sys_listxattr(fname, NULL, 0);
+		else
+			list_len = sys_llistxattr(fname, NULL, 0);
 		if (list_len < 0) {
 			arg = 0;
 			goto got_error;
@@ -170,9 +182,14 @@ static ssize_t get_xattr_names(const char *fname)
 static char *get_xattr_data(const char *fname, const char *name, size_t *len_ptr,
 			    int no_missing_error)
 {
-	size_t datum_len = sys_lgetxattr(fname, name, NULL, 0);
+	size_t datum_len;
 	size_t extra_len = *len_ptr;
 	char *ptr;
+
+    if (copy_links)
+        datum_len = sys_getxattr(fname, name, NULL, 0);
+    else
+        datum_len = sys_lgetxattr(fname, name, NULL, 0);
 
 	*len_ptr = datum_len;
 
@@ -531,6 +548,88 @@ int xattr_diff(struct file_struct *file, stat_x *sxp, int find_all)
 		xattrs_equal = 0;
 
 	return !xattrs_equal;
+}
+
+/* Compares two files with their extended attributes. A source file is
+ * considered for transfer, if its txn_time attribute is bigger than the
+ * destination. Return 1 to skip the transfer of this file, or 0 for it
+ * to be considered for transfer. */
+int xattr_onapp_compare(struct file_struct *file, stat_x *sxp)
+{
+	item_list *lst = rsync_xal_l.items;
+	rsync_xa *snd_rxa, *rec_rxa, *snd_txn_time_rxa = NULL;
+	int snd_cnt, rec_cnt;
+	double snd_txn_time = 0, rec_txn_time = 0;
+	char *snd_checksum = NULL, *rec_checksum = NULL;
+	int snd_checksum_len = 0, rec_checksum_len = 0;
+
+	int skip_file = 0;
+
+	if (sxp && XATTR_READY(*sxp)) {
+		rec_rxa = sxp->xattr->items;
+		rec_cnt = sxp->xattr->count;
+	} else {
+		rec_rxa = NULL;
+		rec_cnt = 0;
+	}
+
+	if (F_XATTR(file) >= 0)
+		lst += F_XATTR(file);
+	else
+		lst = &empty_xattr;
+
+	/* Iterate through xattrs to look for txn_time and checksum */
+	snd_rxa = lst->items;
+	snd_cnt = lst->count;
+
+	for (;snd_cnt--;) {
+		if (!strncmp(snd_rxa->name, "user.txn_time", snd_rxa->name_len)) {
+			snd_txn_time = strtod(snd_rxa->datum, (char **) (snd_rxa->datum + snd_rxa->datum_len));
+			snd_txn_time_rxa = snd_rxa;
+		} else if (!strcmp(snd_rxa->name, "user.checksum")) {
+			snd_checksum = snd_rxa->datum;
+			snd_checksum_len = snd_rxa->datum_len;
+		}
+		snd_rxa++;
+	}
+
+	for (;rec_cnt--;) {
+		if (!strncmp(rec_rxa->name, "user.txn_time", rec_rxa->name_len)) {
+			rec_txn_time = strtod(rec_rxa->datum, (char **) (rec_rxa->datum + rec_rxa->datum_len));
+		} else if (!strncmp(rec_rxa->name, "user.checksum", rec_rxa->name_len)) {
+			rec_checksum = rec_rxa->datum;
+			rec_checksum_len = rec_rxa->datum_len;
+		}
+		rec_rxa++;
+	}
+
+	if (snd_checksum && rec_checksum && !strncmp(snd_checksum, rec_checksum, 32)) {
+		/* No sync needed because files have same checksum. */
+		skip_file = 1;
+
+		/* Update the local txn_time */
+		if (snd_txn_time_rxa && snd_txn_time > rec_txn_time)
+			sys_lsetxattr(file->basename, "user.txn_time", snd_txn_time_rxa->datum, snd_txn_time_rxa->datum_len);
+	} else if (snd_txn_time == 0) {
+		/* Fallback in case a file does not have extended attributes */
+		skip_file = 0;
+	} else if (snd_txn_time <= rec_txn_time) {
+		/* Local file is newer than remote server, skip */
+		skip_file = 1;
+	} else {
+		skip_file = 0;
+	}
+
+	if (INFO_GTE(MISC, 1)) {
+		rprintf(FINFO, "[%s] %s snd_txn_time=%f snd_checksum=%.*s rec_txn_time=%f rec_checksum=%.*s skip=%d\n",
+				who_am_i(), file->basename,
+				snd_txn_time, snd_checksum_len, snd_checksum,
+				rec_txn_time, rec_checksum_len, rec_checksum,
+				skip_file);
+	}
+
+	return skip_file;
+
 }
 
 /* When called by the generator (with a NULL fname), this tells the sender

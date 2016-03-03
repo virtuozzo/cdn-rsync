@@ -30,9 +30,14 @@
 
 #if defined HAVE_LINUX_XATTRS
 
+ssize_t sys_getxattr(const char *path, const char *name, void *value, size_t size)
+{
+	return getxattr(path, name, value, size);
+}
+
 ssize_t sys_lgetxattr(const char *path, const char *name, void *value, size_t size)
 {
-	return lgetxattr(path, name, value, size);
+	return getxattr(path, name, value, size);
 }
 
 ssize_t sys_fgetxattr(int filedes, const char *name, void *value, size_t size)
@@ -48,6 +53,11 @@ int sys_lsetxattr(const char *path, const char *name, const void *value, size_t 
 int sys_lremovexattr(const char *path, const char *name)
 {
 	return lremovexattr(path, name);
+}
+
+ssize_t sys_listxattr(const char *path, char *list, size_t size)
+{
+	return listxattr(path, list, size);
 }
 
 ssize_t sys_llistxattr(const char *path, char *list, size_t size)

@@ -97,6 +97,7 @@ extern char *tmpdir;
 extern char *basis_dir[MAX_BASIS_DIRS+1];
 extern struct file_list *cur_flist, *first_flist, *dir_flist;
 extern filter_rule_list filter_list, daemon_filter_list;
+extern int onapp_compare;
 
 int maybe_ATTRS_REPORT = 0;
 
@@ -1672,6 +1673,13 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
 			rprintf(FINFO, "%s is under min-size\n", fname);
 		}
 		goto cleanup;
+	}
+
+	if (!is_dir && onapp_compare && statret == 0) {
+		if (!XATTR_READY(sx))
+			get_xattr(fname, &sx);
+		if (xattr_onapp_compare(file, &sx))
+			goto cleanup;
 	}
 
 	if (update_only > 0 && statret == 0

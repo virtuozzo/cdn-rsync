@@ -193,6 +193,8 @@ int logfile_format_has_o_or_i = 0;
 int always_checksum = 0;
 int list_only = 0;
 
+int onapp_compare = 0;
+
 #define MAX_BATCH_NAME_LEN 256	/* Must be less than MAXPATHLEN-13 */
 char *batch_name = NULL;
 
@@ -804,6 +806,7 @@ void usage(enum logcode F)
   rprintf(F,"     --checksum-seed=NUM     set block/file checksum seed (advanced)\n");
   rprintf(F," -4, --ipv4                  prefer IPv4\n");
   rprintf(F," -6, --ipv6                  prefer IPv6\n");
+  rprintf(F,"     --onapp-txn             only transfer files with newer txn_time and different checksum\n");
   rprintf(F,"     --version               print version number\n");
   rprintf(F,"(-h) --help                  show this help (-h is --help only if used alone)\n");
 
@@ -1047,6 +1050,7 @@ static struct poptOption long_options[] = {
   {"dparam",           0,  POPT_ARG_STRING, 0, OPT_DAEMON, 0, 0 },
   {"detach",           0,  POPT_ARG_NONE,   0, OPT_DAEMON, 0, 0 },
   {"no-detach",        0,  POPT_ARG_NONE,   0, OPT_DAEMON, 0, 0 },
+  {"onapp-compare",    0,  POPT_ARG_NONE,   &onapp_compare, 0, 0, 0 },
   {0,0,0,0, 0, 0, 0}
 };
 
