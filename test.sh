@@ -58,19 +58,51 @@ function run_test() {
     assert_same  src/file.txt dst/file.txt
 
     echo ================================================
-    echo TEST: Checksum/txn exists at src but not at dst - dst should change
+    echo TEST: Checksum/txn exists at src but not at dst - dst should change even though newer
     init $file_type
     echo quick brown fox > src/file.txt
     set_checksum src/file.txt
     set_txn      src/file.txt 1
     set_mtime    src/file.txt 1
-    echo quick brown fox > dst/file.txt
-    set_mtime    dst/file.txt 1
+    echo lazy old dog > dst/file.txt
+    set_mtime    dst/file.txt 2
     sync
 
     assert_size dst/file.txt 16
     assert_attr dst/file.txt user.checksum $(md5 dst/file.txt)
     assert_attr dst/file.txt user.txn_time 1
+    assert_same  src/file.txt dst/file.txt
+
+    echo ================================================
+    echo TEST: Checksum/txn exists at dst but not at src - dst should change
+    init $file_type
+    echo quick brown fox > src/file.txt
+    set_mtime    src/file.txt 2
+    echo lazy old dog > dst/file.txt
+    set_txn      dst/file.txt 1
+    set_checksum dst/file.txt
+    set_mtime    dst/file.txt 1
+    sync
+
+    assert_size dst/file.txt 16
+    assert_attr dst/file.txt user.checksum ""
+    assert_attr dst/file.txt user.txn_time ""
+    assert_same  src/file.txt dst/file.txt
+
+    echo ================================================
+    echo TEST: Checksum/txn exists at dst but not at src - dst should change even though newer
+    init $file_type
+    echo quick brown fox > src/file.txt
+    set_mtime    src/file.txt 1
+    echo lazy old dog > dst/file.txt
+    set_txn      dst/file.txt 1
+    set_checksum dst/file.txt
+    set_mtime    dst/file.txt 2
+    sync
+
+    assert_size dst/file.txt 16
+    assert_attr dst/file.txt user.checksum ""
+    assert_attr dst/file.txt user.txn_time ""
     assert_same  src/file.txt dst/file.txt
 
     echo ================================================
@@ -93,6 +125,26 @@ function run_test() {
     assert_same  src/file.txt dst/file.txt
 
     echo ================================================
+    echo TEST: Checksum/txn same, file sizes different - dst should change
+    init $file_type
+    echo quick brown fox > src/file.txt
+    set_checksum src/file.txt
+    set_txn      src/file.txt 1
+    set_mtime    src/file.txt 1
+    echo quick brown fox > dst/file.txt
+    set_checksum dst/file.txt
+    echo -n > dst/file.txt # simulate file being zero-length
+    set_txn      dst/file.txt 1
+    set_mtime    dst/file.txt 1
+    sync
+
+    assert_size  dst/file.txt 16
+    assert_mtime dst/file.txt 1
+    assert_attr  dst/file.txt user.txn_time 1
+    assert_attr  dst/file.txt user.checksum $(md5 dst/file.txt)
+    assert_same  src/file.txt dst/file.txt
+
+    echo ================================================
     echo TEST: checksum different, src txn older than dst txn - dst should not change
     init $file_type
     set_checksum src/file.txt
@@ -104,6 +156,22 @@ function run_test() {
     sync
 
     assert_size  dst/file.txt 13
+    assert_attr  dst/file.txt user.txn_time 2
+    assert_attr  dst/file.txt user.checksum $original_md5
+
+    echo ================================================
+    echo TEST: checksum different, file sizes same, src txn older than dst txn - dst should not change
+    init $file_type
+    echo quick brown fox > dst/file.txt
+    set_checksum src/file.txt
+    set_txn      src/file.txt 1
+    echo lazy brown dogs > dst/file.txt
+    set_checksum dst/file.txt
+    set_txn      dst/file.txt 2
+    original_md5=$(md5 dst/file.txt)
+    sync
+
+    assert_size  dst/file.txt 16
     assert_attr  dst/file.txt user.txn_time 2
     assert_attr  dst/file.txt user.checksum $original_md5
 
@@ -252,7 +320,7 @@ function assert_attr() {
     file=$1
     attr_name=$2
     expected_val=$3
-    actual_val=$(getfattr -n $attr_name --only-values $file)
+    actual_val=$(getfattr -n $attr_name --only-values $file 2>/dev/null)
 
     if [ "$actual_val" != "$expected_val" ]; then
         assert_fail "$file attr $attr_name actual=$actual_val expected=$expected_val"

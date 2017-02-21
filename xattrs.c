@@ -604,12 +604,17 @@ int xattr_onapp_compare(struct file_struct *file, stat_x *sxp)
 	}
 
 	if (snd_checksum && rec_checksum && !strncmp(snd_checksum, rec_checksum, 32)) {
-		/* No sync needed because files have same checksum. */
-		skip_file = 1;
+		if (F_LENGTH(file) == sxp->st.st_size) {
+			/* No sync needed because files have same checksum and size. */
+			skip_file = 1;
 
-		/* Update the local txn_time */
-		if (snd_txn_time_rxa && snd_txn_time > rec_txn_time)
-			sys_lsetxattr(file->basename, "user.txn_time", snd_txn_time_rxa->datum, snd_txn_time_rxa->datum_len);
+			/* Update the local txn_time */
+			if (snd_txn_time_rxa && snd_txn_time > rec_txn_time)
+				sys_lsetxattr(file->basename, "user.txn_time", snd_txn_time_rxa->datum, snd_txn_time_rxa->datum_len);
+		} else {
+			/* Sync needed because files have same checksum but are different size. */
+			skip_file = 0;
+		}
 	} else if (snd_txn_time == 0) {
 		/* Fallback in case a file does not have extended attributes */
 		skip_file = 0;
